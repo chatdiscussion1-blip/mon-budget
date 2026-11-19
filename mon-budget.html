@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f766e">
+<title>Mon Budget</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:#f4f6f6;color:#1b1f1f;padding-bottom:130px}
+main{padding:14px;max-width:640px;margin:auto}
+h2{font-size:17px;margin:18px 0 8px}
+.card{background:#fff;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 1px 3px #0002}
+.big{font-size:26px;font-weight:700}
+.muted{font-size:12px;color:#555}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pos{color:#15803d}.neg{color:#b91c1c}
+.bar{height:9px;background:#e2e8e8;border-radius:6px;overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:#0f766e}
+.bar i.w{background:#f59e0b}.bar i.o{background:#dc2626}
+.line{display:flex;justify-content:space-between;gap:8px;font-size:14px}
+.row{background:#fff;border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;border-left:5px solid #9ca3af}
+.row.ok{border-left-color:#16a34a}.row.bad{border-left-color:#dc2626}
+.row b{display:block;font-size:14px}
+.row small{color:#555}
+.x{border:0;background:none;font-size:18px;color:#999;padding:4px 8px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#fff;border-top:1px solid #ddd}
+nav button{flex:1;padding:14px 4px;border:0;background:none;font-size:13px;color:#555}
+nav button.on{color:#0f766e;font-weight:700;border-top:3px solid #0f766e}
+#fab{position:fixed;right:14px;bottom:68px;background:#0f766e;color:#fff;border:0;border-radius:28px;padding:14px 20px;font-size:15px;font-weight:600;box-shadow:0 3px 8px #0004}
+#modal{position:fixed;inset:0;background:#0008;display:flex;align-items:flex-end;z-index:9}
+#modal[hidden]{display:none}
+.sheet{background:#fff;width:100%;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px}
+.sheet label{display:block;font-size:13px;margin:10px 0 0;color:#333}
+.sheet input,.sheet select{width:100%;padding:11px;font-size:16px;border:1px solid #bbb;border-radius:10px;margin-top:4px;background:#fff}
+.seg{display:flex;gap:8px}
+.seg button{flex:1;padding:10px;border:1px solid #0f766e;border-radius:10px;background:#fff;color:#0f766e;font-size:15px}
+.seg button.on{background:#0f766e;color:#fff}
+.btn{width:100%;padding:13px;margin-top:14px;border:0;border-radius:12px;background:#0f766e;color:#fff;font-size:16px;font-weight:600}
+.btn.alt{background:#e5e7eb;color:#111;margin-top:8px}
+.nav2{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.nav2 button{border:0;background:#fff;border-radius:10px;padding:8px 14px;font-size:18px;box-shadow:0 1px 3px #0002}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<button id="fab" onclick="openOp()">+ Opération</button>
+<nav>
+  <button data-t="home" onclick="go('home')">Accueil</button>
+  <button data-t="plan" onclick="go('plan')">Prévisions</button>
+  <button data-t="bud" onclick="go('bud')">Budgets</button>
+</nav>
+<div id="modal" hidden></div>
+
+<script>
+const KEY='budget_v1';
+let S=load();
+function load(){
+  try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.cats)return s}catch(e){}
+  const outs=['Logement','Alimentation','Transport','Téléphone / Internet','Santé','Famille','Loisirs','Épargne','Autres'];
+  const ins=['Salaire','Autres revenus'];
+  let id=1;const cats=[];
+  outs.forEach(n=>cats.push({id:id++,name:n,type:'out',budget:0}));
+  ins.forEach(n=>cats.push({id:id++,name:n,type:'in',budget:0}));
+  return {cats,planned:[],ops:[],next:100};
+}
+function save(){localStorage.setItem(KEY,JSON.stringify(S));render()}
+const uid=()=>S.next++;
+const $=s=>document.querySelector(s);
+const pad=n=>String(n).padStart(2,'0');
+const ymd=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const ym=d=>d.getFullYear()+'-'+pad(d.getMonth()+1);
+const fmt=n=>Math.round(n).toLocaleString('fr-FR')+' FCFA';
+const sum=a=>a.reduce((t,x)=>t+x.amount,0);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cat=id=>S.cats.find(c=>c.id===id)||{name:'?'};
+const doneOp=p=>S.ops.find(o=>o.pid===p.id);
+function addMonths(ds,i){
+  const [y,m,d]=ds.split('-').map(Number);
+  const t=new Date(y,m-1+i,1);
+  const last=new Date(t.getFullYear(),t.getMonth()+1,0).getDate();
+  t.setDate(Math.min(d,last));return ymd(t);
+}
+
+let tab='home';
+let month=new Date();month.setDate(1);
+function go(t){tab=t;render()}
+function render(){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+  $('#app').innerHTML=tab==='home'?home():tab==='plan'?plan():budgets();
+}
+
+/* ---------- ACCUEIL ---------- */
+function home(){
+  const m=ym(new Date());
+  const solde=sum(S.ops.filter(o=>o.type==='in'))-sum(S.ops.filter(o=>o.type==='out'));
+  const opsM=S.ops.filter(o=>o.date.startsWith(m));
+  const inM=sum(opsM.filter(o=>o.type==='in')),outM=sum(opsM.filter(o=>o.type==='out'));
+  const pend=S.planned.filter(p=>!doneOp(p)&&p.date<=m+'-31');
+  const pIn=sum(pend.filter(p=>p.type==='in')),pOut=sum(pend.filter(p=>p.type==='out'));
+  const proj=solde+pIn-pOut;
+  const bars=S.cats.filter(c=>c.type==='out').map(c=>({c,t:sum(opsM.filter(o=>o.cat===c.id&&o.type==='out'))}))
+    .filter(x=>x.t>0).sort((a,b)=>b.t-a.t).map(({c,t})=>{
+      const base=c.budget>0?c.budget:outM;
+      const r=Math.min(100,base?t/base*100:0);
+      const cls=c.budget>0?(t>c.budget?'o':t>=c.budget*0.8?'w':''):'';
+      return `<div style="margin:10px 0"><div class="line"><span>${esc(c.name)}</span><span>${fmt(t)}${c.budget>0?' / '+fmt(c.budget):''}</span></div><div class="bar"><i class="${cls}" style="width:${r}%"></i></div></div>`;
+    }).join('')||'<p class="muted">Aucune dépense enregistrée ce mois-ci.</p>';
+  const recent=[...S.ops].sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:b.id-a.id).slice(0,8).map(o=>
+    `<div class="row"><div><b>${esc(o.label)}</b><small>${o.date} • ${esc(cat(o.cat).name)}${o.pid?' • prévu':''}</small></div>
+     <div class="${o.type==='in'?'pos':'neg'}">${o.type==='in'?'+':'-'}${fmt(o.amount)}<button class="x" onclick="delOp(${o.id})">✕</button></div></div>`).join('');
+  return `<h2>${new Date().toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}</h2>
+  <div class="card"><div class="muted">Solde réel</div><div class="big">${fmt(solde)}</div>
+  <div class="${proj<0?'neg':'pos'}" style="font-weight:600;margin-top:6px">Solde prévu fin de mois : ${fmt(proj)}</div>
+  <div class="muted">Reste à encaisser ${fmt(pIn)} • reste à payer ${fmt(pOut)}</div></div>
+  <div class="grid"><div class="card"><div class="muted">Entrées du mois</div><b class="pos">${fmt(inM)}</b></div>
+  <div class="card"><div class="muted">Sorties du mois</div><b class="neg">${fmt(outM)}</b></div></div>
+  <h2>Où est parti mon argent ?</h2><div class="card">${bars}</div>
+  <h2>Dernières opérations</h2>${recent||'<p class="muted">Rien pour l\'instant. Appuie sur « + Opération ».</p>'}`;
+}
+function delOp(id){
+  if(!confirm('Supprimer cette opération ?'))return;
+  S.ops=S.ops.filter(o=>o.id!==id);save();
+}
+
+/* ---------- PRÉVISIONS ---------- */
+function plan(){
+  const m=ym(month),today=ymd(new Date());
+  const rows=S.planned.filter(p=>p.date.startsWith(m)).sort((a,b)=>a.date<b.date?-1:1);
+  let pv=0,rl=0;
+  const items=rows.map(p=>{
+    const o=doneOp(p),late=!o&&p.date<today;
+    if(p.type==='out'){pv+=p.amount;if(o)rl+=o.amount}
+    const st=o?'Effectuée':late?'En retard':'À venir';
+    const extra=o?`<br><small>Réel ${fmt(o.amount)} • écart ${fmt(p.amount-o.amount)}</small>`:'';
+    return `<div class="row ${o?'ok':late?'bad':''}" ${o?'':`onclick="openOp(${p.id})"`}>
+      <div><b>${esc(p.label)}</b><small>${p.date} • ${esc(cat(p.cat).name)} • ${st}</small>${extra}</div>
+      <div class="${p.type==='in'?'pos':'neg'}">${p.type==='in'?'+':'-'}${fmt(p.amount)}<button class="x" onclick="event.stopPropagation();delPlan(${p.id})">✕</button></div></div>`;
+  }).join('')||'<p class="muted">Aucune prévision ce mois-ci.</p>';
+  return `<div class="nav2"><button onclick="shift(-1)">‹</button>
+    <b>${month.toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}</b>
+    <button onclick="shift(1)">›</button></div>
+  <button class="btn" style="margin:0 0 10px" onclick="openPlan()">+ Ajouter une prévision</button>
+  <div class="card"><b>Sorties</b> : prévu ${fmt(pv)} • réel ${fmt(rl)}<br>
+  <b class="${pv-rl<0?'neg':'pos'}">Écart : ${fmt(pv-rl)}</b></div>
+  <p class="muted">Touche une ligne « à venir » pour enregistrer la dépense réelle liée.</p>${items}`;
+}
+function shift(n){month=new Date(month.getFullYear(),month.getMonth()+n,1);render()}
+function delPlan(id){
+  if(!confirm('Supprimer cette prévision ?'))return;
+  S.planned=S.planned.filter(p=>p.id!==id);S.ops.forEach(o=>{if(o.pid===id)o.pid=null});save();
+}
+
+/* ---------- BUDGETS ---------- */
+function budgets(){
+  const rows=S.cats.filter(c=>c.type==='out').map(c=>
+    `<div class="row" onclick="setBudget(${c.id})"><b>${esc(c.name)}</b><span>${c.budget>0?fmt(c.budget):'Non défini'}</span></div>`).join('');
+  return `<h2>Budget mensuel par catégorie</h2><p class="muted">Barre orange à 80 %, rouge au-delà.</p>${rows}
+  <h2>Sauvegarde</h2>
+  <div class="card"><p class="muted">Tes données restent sur ce téléphone. Fais une sauvegarde de temps en temps.</p>
+  <button class="btn" onclick="exportData()">Exporter une sauvegarde</button>
+  <button class="btn alt" onclick="$('#imp').click()">Importer une sauvegarde</button>
+  <input id="imp" type="file" accept=".json" hidden onchange="importData(this)"></div>`;
+}
+function setBudget(id){
+  const c=S.cats.find(x=>x.id===id);
+  const v=prompt('Budget mensuel pour « '+c.name+' » (FCFA)',c.budget||'');
+  if(v===null)return;
+  c.budget=Math.max(0,parseFloat(String(v).replace(/\s/g,'').replace(',','.'))||0);save();
+}
+function exportData(){
+  const b=new Blob([JSON.stringify(S)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);
+  a.download='sauvegarde-budget-'+ymd(new Date())+'.json';a.click();
+}
+function importData(inp){
+  const f=inp.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.cats||!d.ops)throw 0;
+    if(confirm('Remplacer les données actuelles par la sauvegarde ?')){S=d;save()}}catch(e){alert('Fichier non valide')}};
+  r.readAsText(f);
+}
+
+/* ---------- MODALES ---------- */
+function closeModal(){$('#modal').hidden=true;$('#modal').innerHTML=''}
+function catOptions(type,sel){
+  return '<option value="">Choisir…</option>'+S.cats.filter(c=>c.type===type)
+    .map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${esc(c.name)}</option>`).join('');
+}
+
+function openOp(plannedId){
+  const p=plannedId?S.planned.find(x=>x.id===plannedId):null;
+  const st={type:p?p.type:'out',a:p?String(Math.round(p.amount)):'',l:p?p.label:'',c:p?p.cat:null,pid:p?p.id:null,d:ymd(new Date())};
+  const draw=()=>{
+    const pend=S.planned.filter(x=>!doneOp(x)&&x.type===st.type).sort((a,b)=>a.date<b.date?-1:1);
+    $('#modal').hidden=false;
+    $('#modal').innerHTML=`<div class="sheet">
+    <div class="seg"><button class="${st.type==='out'?'on':''}" id="t1">Dépense</button><button class="${st.type==='in'?'on':''}" id="t2">Entrée</button></div>
+    <label>Montant réel (FCFA)<input id="a" type="number" inputmode="numeric" value="${esc(st.a)}"></label>
+    <label>Libellé<input id="l" value="${esc(st.l)}"></label>
+    <label>Catégorie<select id="c">${catOptions(st.type,st.c)}</select></label>
+    ${pend.length?`<label>Rattacher à une prévision (facultatif)<select id="p"><option value="">Aucune</option>${pend.map(x=>`<option value="${x.id}" ${x.id===st.pid?'selected':''}>${esc(x.label)} • ${fmt(x.amount)} • ${x.date}</option>`).join('')}</select></label>`:''}
+    <label>Date<input id="d" type="date" value="${st.d}"></label>
+    <button class="btn" id="ok">Enregistrer</button><button class="btn alt" id="no">Annuler</button></div>`;
+    $('#t1').onclick=()=>{st.type='out';st.c=null;st.pid=null;draw()};
+    $('#t2').onclick=()=>{st.type='in';st.c=null;st.pid=null;draw()};
+    $('#a').oninput=e=>st.a=e.target.value;
+    $('#l').oninput=e=>st.l=e.target.value;
+    $('#c').onchange=e=>st.c=e.target.value?+e.target.value:null;
+    $('#d').onchange=e=>st.d=e.target.value;
+    if($('#p'))$('#p').onchange=e=>{
+      st.pid=e.target.value?+e.target.value:null;
+      if(st.pid){const x=S.planned.find(y=>y.id===st.pid);
+        if(!st.l)st.l=x.label;if(!st.a)st.a=String(Math.round(x.amount));st.c=x.cat}
+      draw();
+    };
+    $('#no').onclick=closeModal;
+    $('#ok').onclick=()=>{
+      const a=parseFloat(String(st.a).replace(/\s/g,'').replace(',','.'));
+      if(!(a>0)||!st.c){alert('Indique un montant et une catégorie');return}
+      S.ops.push({id:uid(),label:st.l.trim()||'Sans libellé',amount:a,date:st.d||ymd(new Date()),cat:st.c,type:st.type,pid:st.pid});
+      closeModal();save();
+    };
+  };
+  draw();
+}
+
+function openPlan(){
+  const st={type:'out',a:'',l:'',c:null,d:ymd(new Date()),rep:1};
+  const draw=()=>{
+    $('#modal').hidden=false;
+    $('#modal').innerHTML=`<div class="sheet">
+    <div class="seg"><button class="${st.type==='out'?'on':''}" id="t1">Sortie prévue</button><button class="${st.type==='in'?'on':''}" id="t2">Entrée prévue</button></div>
+    <label>Libellé (ex. Loyer)<input id="l" value="${esc(st.l)}"></label>
+    <label>Montant prévu (FCFA)<input id="a" type="number" inputmode="numeric" value="${esc(st.a)}"></label>
+    <label>Catégorie<select id="c">${catOptions(st.type,st.c)}</select></label>
+    <label>Date prévue<input id="d" type="date" value="${st.d}"></label>
+    <label>Répéter chaque mois sur<select id="r">${[1,3,6,12].map(n=>`<option value="${n}" ${n===st.rep?'selected':''}>${n===1?'1 mois (une seule fois)':n+' mois'}</option>`).join('')}</select></label>
+    <button class="btn" id="ok">Enregistrer la prévision</button><button class="btn alt" id="no">Annuler</button></div>`;
+    $('#t1').onclick=()=>{st.type='out';st.c=null;draw()};
+    $('#t2').onclick=()=>{st.type='in';st.c=null;draw()};
+    $('#l').oninput=e=>st.l=e.target.value;
+    $('#a').oninput=e=>st.a=e.target.value;
+    $('#c').onchange=e=>st.c=e.target.value?+e.target.value:null;
+    $('#d').onchange=e=>st.d=e.target.value;
+    $('#r').onchange=e=>st.rep=+e.target.value;
+    $('#no').onclick=closeModal;
+    $('#ok').onclick=()=>{
+      const a=parseFloat(String(st.a).replace(/\s/g,'').replace(',','.'));
+      if(!(a>0)||!st.c||!st.l.trim()||!st.d){alert('Remplis libellé, montant, catégorie et date');return}
+      for(let i=0;i<st.rep;i++)S.planned.push({id:uid(),label:st.l.trim(),amount:a,date:addMonths(st.d,i),cat:st.c,type:st.type});
+      closeModal();save();
+    };
+  };
+  draw();
+}
+
+render();
+</script>
+</body>
+</html>
